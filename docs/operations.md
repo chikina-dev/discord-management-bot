@@ -1,7 +1,13 @@
 # 運用手順
 
 Ansibleの操作は実行用コンテナ内の/workspace/ansibleから行う。
-READMEの構築手順でコンテナイメージを作り、対話操作には以下を使う。
+リポジトリ直下で実行用コンテナをビルドする。
+
+```sh
+docker build --platform linux/arm64 -f ansible/Dockerfile -t discord-gateway-ansible .
+```
+
+対話操作には以下を使う。
 
 ```sh
 docker run --rm -it --platform linux/arm64 --entrypoint /bin/bash \
@@ -17,7 +23,11 @@ PCのWireGuard接続前でもSSMでホストを管理できる。
 
 ## 再配置・状態確認
 
-Goの変更後はREADMEのDockerビルドを実行し、ansible-playbook site.ymlで配置する。
+Goの変更後はリポジトリ直下でARM64バイナリをビルドし、実行用コンテナ内のansible-playbook site.ymlで配置する。
+
+```sh
+docker build --platform linux/arm64 -f Dockerfile.build --target artifact --output type=local,dest=dist .
+```
 Gatewayのbinary・unit、または参照するSSMパラメーターのVersionが変わった場合にGatewayを再起動する。
 SSMはVersionだけを読み、秘密値をホストの設定ファイルに保存しない。管理listenerのhealth確認後に適用済みVersionを記録する。
 backup unitの変更では定義だけをreloadし、timer変更ではtimerを再起動する。DNS unit・共用binaryの変更はDNS updaterも再実行する。
@@ -101,5 +111,5 @@ Discord側のResumeが成立しない区間について、履歴APIからの補�
 
 このMacでは、AWS inventoryを使ったAnsibleのワーカーがmacOSのfork処理でクラッシュする。
 [Ansible本体にも同種の報告がある](https://github.com/ansible/ansible/issues/87125)。
-ホストのPythonやAnsibleを改変せず、READMEに記載したLinuxコンテナから同じplaybookを実行する。
+ホストのPythonやAnsibleを改変せず、本書のLinuxコンテナから同じplaybookを実行する。
 コンテナにはソースや秘密情報を焼き込まず、AWS認証情報は実行時に読み取り専用で渡す。
