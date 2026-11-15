@@ -15,3 +15,4 @@ WireGuard接続後、[discord-gateway Skill](skills/discord-gateway/SKILL.md)で
 - [条件式](docs/conditions.md)
 - [Workerへの配信と結果通知](docs/protocol.md)
 - [設計](docs/design.md)
+- [運用手順](docs/operations.md)

@@ -17,26 +17,11 @@ EC2の受信用BotでGatewayイベントを受信し、保存した条件式に�
 リポジトリ直下の.envをTerraformが直接読む。
 入力名はDISCORD_BOT_TOKEN・DISCORD_SERVER_ID・DISCORD_WEBHOOK_URL・PC_WIREGUARD_PUBLIC_KEY。
 これらを受信用Bot Token・サーバーID・通知Webhook URL・PCのWireGuard公開鍵としてSSMへ保存する。
-tfvarsとの二重管理や、shellによる変数展開・実行は行わない。
 EC2の署名seedとWireGuard秘密鍵はTerraformのrandom_bytesで生成し、stateに保持する。
-SSMの手動作成・手動登録、AnsibleやGoからのSSM書込みは行わない。
+AnsibleとGoは、Terraformが管理するSSM値を参照する。
 
 固定の構成値は、その構成を組み立てるコードに置く。
 アプリの保存先・待受ポート・ホスト名を引数やenvの選択肢に展開しない。
-HTTPクライアント、DB、鍵などの実際の依存先はテストコードから渡せるようにする。
-本番コードにローカルモードや模擬Gateway用の分岐を持たせない。
-
-## 構築の依存関係
-
-1. Terraformのbootstrapで、stateとAnsible一時転送のS3を用意する。
-2. Terraformで入力値・生成鍵のSSMパラメーターと、EC2・EBS・ネットワーク・IAM・DNS・監視・通知経路を管理する。
-3. Linux ARM64バイナリをビルドする。
-4. AnsibleがSSM経由でEC2に接続し、マウント・WireGuard・監視・systemd・アプリを構成して起動する。
-5. AnsibleがEC2のWireGuard公開鍵を取得し、PCの秘密鍵を含まないクライアントconfigをローカルへ出力する。
-
-構築と起動を、秘密情報の未登録を理由に分割するフラグは設けない。
-入力とSSMはTerraformで完成させてからAnsibleへ進む。
-適用・起動・importなどの実環境操作は、レビュー後に明示された範囲でのみ実行する。
 
 ## SSMと鍵の管理
 
@@ -54,7 +39,6 @@ SSMパラメーターは[parameters.tf](../infra/parameters.tf)がすべて宣�
 接頭辞は/discord-management-bot。
 GoのIAMロールに許可するSSM参照先はbot-token・guild-id・signing-seedの3つだけ。
 Terraformの生成鍵は、EC2の再起動・再配置・再作成を理由に作り直さない。
-既存の手動作成済みパラメーターと鍵は、値を維持してTerraformへ引き継ぐ。[引継ぎ方針](terraform-adoption.md)を参照。
 
 ## イベント処理とトリガー
 
@@ -97,7 +81,7 @@ Worker側の重複排除が、同じ配信の処理の重複を防ぐ。
 URLと結果検証用公開鍵も初回送信時に固定し、配信先の更新は未送信分に適用する。
 送信済み分は旧URL・旧公開鍵のまま処理を完了する。鍵更新は即時失効ではない。
 結果の保存は署名検証済み鍵IDを条件に含めて原子的に行い、事前の配信snapshot取得から保存までの競合で認可をすり抜けない。
-PDF投稿から10分といった業務上の期限は、WorkerがDiscordのtimestampから判断する。
+イベント処理の有効期限は、WorkerがDiscordのtimestampから判断する。
 再接続はResumeと保存済みデータの再送までとし、Discordの履歴APIから補完しない。
 
 ## ネットワークと運用
@@ -119,9 +103,6 @@ SQLiteは専用EBSに保存する。
 基盤異常・復旧はCloudWatch→EventBridge→API Destination→Discord Webhookで通知する。
 Workerの失敗・一部成功は記録と可視化の対象とし、Discordの基盤異常通知には流さない。
 
-PDFプレビュー側の変更・移行は別作業。Timelineの移行はその後に進める。
-性能は実際のt4g.nanoで、WireGuard・監視・SSM Agentも含む通常時・負荷時・バックアップ時を測定する。
-
 ## 永続データの保守とホストの起動
 
 Gatewayとバックアップは、同じmaintenance lockを共有で保持する。
@@ -137,9 +118,11 @@ gzip出力は5MiBずつS3 multipartへ送り、圧縮済みの2つ目の一時�
 AnsibleはEBS内の数値UID/GIDを検査し、不一致時だけwriterを静止させて所有者を整合する。
 再帰的なmode変更は行わず、DBや証明書の0600・0700を保持する。
 起動操作は変更された対象ごとに決め、backup-onlyのunit変更でGatewayを再起動しない。
-Goの参照するSSMパラメーターはVersionだけを比較し、変更時にGatewayを再起動する。秘密値はホストの設定ファイルへ保存しない。
+Ansibleは、Goが参照するSSMパラメーターのVersionを比較し、変更時にGatewayを再起動する。これらの値はホストの設定ファイルへ保存しない。
 適用済みVersionは管理listenerのhealth確認後に記録する。
 
 DNS updaterは独立し、失敗後のprocess retryはsystemdが所有する。
 GatewayをDNSの成功に従属させず、WireGuardの初回失敗もlistenerのbind失敗によるprocess retryで回復する。
 Ansibleは配置時のreadinessを確認し、常駐retry controllerにはならない。
+
+再配置・状態確認・復旧の手順は[運用手順](operations.md)を参照。
