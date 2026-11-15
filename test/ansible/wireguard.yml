@@ -1,0 +1,38 @@
+- name: Render WireGuard templates locally without AWS or a tunnel
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    wireguard_server_private_key: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    wireguard_client_public_key: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+  tasks:
+    - name: Create an isolated render directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: discord-gateway-wireguard-test-
+      register: render_directory
+    - name: Render and validate both sides
+      block:
+        - name: Derive a public key from the Terraform key encoding
+          ansible.builtin.command:
+            argv: [wg, pubkey]
+            stdin: '{{ wireguard_server_private_key }}'
+          register: fixture_public_key
+          changed_when: false
+        - name: Render the EC2 configuration using fixture values
+          ansible.builtin.template:
+            src: ../../ansible/templates/wg0.conf.j2
+            dest: '{{ render_directory.path }}/wg0.conf'
+            mode: '0600'
+        - name: Render the PC configuration using the derived public key
+          ansible.builtin.template:
+            src: ../../ansible/templates/wireguard-client.conf.j2
+            dest: '{{ render_directory.path }}/client.conf'
+            mode: '0600'
+          vars:
+            server_public_key: '{{ fixture_public_key.stdout }}'
+      always:
+        - name: Remove fixture files
+          ansible.builtin.file:
+            path: '{{ render_directory.path }}'
+            state: absent

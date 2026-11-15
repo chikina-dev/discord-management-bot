@@ -1,0 +1,9 @@
+[Unit]
+Description=Hourly SQLite backup
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+AccuracySec=10s
+Persistent=true
+[Install]
+WantedBy=timers.target

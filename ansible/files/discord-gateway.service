@@ -1,0 +1,27 @@
+[Unit]
+Description=Discord event gateway
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target wg-quick@wg0.service
+StartLimitIntervalSec=0
+RequiresMountsFor=/var/lib/discord-gateway
+[Service]
+User=discord-gateway
+Group=discord-gateway
+UMask=0077
+ExecStart=/usr/local/bin/discord-gateway
+Restart=on-failure
+RestartSec=2
+Environment=GOMEMLIMIT=128MiB
+MemoryMax=256M
+NoNewPrivileges=yes
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/discord-gateway /var/log/discord-gateway
+StandardOutput=append:/var/log/discord-gateway/gateway.log
+StandardError=append:/var/log/discord-gateway/gateway.log
+TimeoutStopSec=15
+[Install]
+WantedBy=multi-user.target

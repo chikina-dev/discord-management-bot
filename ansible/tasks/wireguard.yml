@@ -1,0 +1,52 @@
+- name: Create the WireGuard configuration directory
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    mode: '0700'
+
+- name: Install the EC2 WireGuard configuration
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: /etc/wireguard/wg0.conf
+    owner: root
+    group: root
+    mode: '0600'
+  vars:
+    wireguard_server_private_key: "{{ lookup('amazon.aws.ssm_parameter', '/discord-management-bot/wireguard-server-key', region='ap-northeast-1', profile='default') }}"
+    wireguard_client_public_key: "{{ lookup('amazon.aws.ssm_parameter', '/discord-management-bot/wireguard-client-public-key', region='ap-northeast-1', profile='default') }}"
+  no_log: true
+  diff: false
+  notify: Restart WireGuard
+
+- name: Apply changed WireGuard keys before reading the public key
+  ansible.builtin.meta: flush_handlers
+
+- name: Start the EC2 WireGuard interface on boot
+  ansible.builtin.systemd_service:
+    name: wg-quick@wg0
+    enabled: true
+    state: started
+
+- name: Read the EC2 WireGuard public key
+  ansible.builtin.command:
+    argv: [wg, show, wg0, public-key]
+  register: wireguard_server_public_key
+  changed_when: false
+
+- name: Create the private local output directory
+  ansible.builtin.file:
+    path: '{{ playbook_dir }}/../.local'
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+
+- name: Write the PC configuration example without a PC private key
+  ansible.builtin.template:
+    src: wireguard-client.conf.j2
+    dest: '{{ playbook_dir }}/../.local/wireguard-client.conf.example'
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  vars:
+    server_public_key: '{{ wireguard_server_public_key.stdout }}'

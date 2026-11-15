@@ -1,0 +1,21 @@
+- name: Install log rotation configuration
+  ansible.builtin.copy:
+    src: discord-gateway.logrotate
+    dest: /etc/logrotate.d/discord-gateway
+    mode: '0644'
+
+- name: Install the CloudWatch agent configuration
+  ansible.builtin.copy:
+    src: cloudwatch-agent.json
+    dest: /etc/amazon-cloudwatch-agent.json
+    mode: '0644'
+  notify: Restart CloudWatch agent
+
+- name: Load monitoring configuration before checking the service
+  ansible.builtin.meta: flush_handlers
+
+- name: Keep CloudWatch agent enabled
+  ansible.builtin.systemd_service:
+    name: amazon-cloudwatch-agent
+    enabled: true
+    state: started

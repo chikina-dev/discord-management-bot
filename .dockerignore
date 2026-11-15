@@ -1,0 +1,15 @@
+.git
+.local
+.cache
+bin
+dist
+tmp
+test
+infra/.terraform
+infra/bootstrap/.terraform
+*.tfstate*
+*.tfplan
+.env*
+
+*.tfvars
+*.tfvars.json

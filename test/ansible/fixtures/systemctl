@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""Isolated service-manager adapter used only by the host lifecycle tests."""
+import json
+import os
+import sys
+from pathlib import Path
+
+root = Path(os.environ['FAKE_SYSTEMD_ROOT'])
+root.mkdir(parents=True, exist_ok=True)
+args = [value for value in sys.argv[1:] if not value.startswith('--')]
+command = args[0] if args else ''
+unit = args[1] if len(args) > 1 else ''
+state_file = root / 'state.json'
+state = json.loads(state_file.read_text()) if state_file.exists() else {}
+current = state.get(unit, {'active': 'active', 'enabled': True})
+if command == 'show':
+    print('LoadState=loaded')
+    print('ActiveState=' + current['active'])
+    print('UnitFileState=' + ('enabled' if current['enabled'] else 'disabled'))
+elif command == 'is-enabled':
+    print('enabled' if current['enabled'] else 'disabled')
+    sys.exit(0 if current['enabled'] else 1)
+elif command in ('start', 'stop', 'restart', 'enable', 'disable', 'daemon-reload'):
+    with (root / 'effects.jsonl').open('a') as log:
+        log.write(json.dumps({'command': command, 'unit': unit}) + '\n')
+    if command in ('start', 'restart'): current['active'] = 'active'
+    if command == 'stop': current['active'] = 'inactive'
+    if command == 'enable': current['enabled'] = True
+    if command == 'disable': current['enabled'] = False
+    state[unit] = current
+    state_file.write_text(json.dumps(state))
+else:
+    print('Unsupported fixture systemctl request: ' + repr(args), file=sys.stderr)
+    sys.exit(1)

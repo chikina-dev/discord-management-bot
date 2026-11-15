@@ -1,0 +1,47 @@
+- name: Configure the Discord gateway host
+  hosts: aws_ec2
+  become: true
+  gather_subset:
+    - min
+  pre_tasks:
+    - name: Require exactly the intended host
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - ansible_facts.distribution == 'Amazon'
+          - ansible_facts.architecture == 'aarch64'
+        quiet: true
+      tags: always
+  tasks:
+    - name: Install host packages
+      ansible.builtin.import_tasks: tasks/packages.yml
+      tags: host
+    - name: Mount persistent storage
+      ansible.builtin.import_tasks: tasks/storage.yml
+      tags: host
+    - name: Configure the EC2 WireGuard interface
+      ansible.builtin.import_tasks: tasks/wireguard.yml
+      tags: wireguard
+    - name: Configure monitoring
+      ansible.builtin.import_tasks: tasks/monitoring.yml
+      tags: monitoring
+    - name: Deploy the gateway
+      ansible.builtin.import_tasks: tasks/application.yml
+      tags: application
+  handlers:
+    - name: Restart WireGuard
+      ansible.builtin.systemd_service:
+        name: wg-quick@wg0
+        state: restarted
+    - name: Restart CloudWatch agent
+      ansible.builtin.command:
+        argv:
+          - /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+          - -a
+          - fetch-config
+          - -m
+          - ec2
+          - -c
+          - file:/etc/amazon-cloudwatch-agent.json
+          - -s
+      changed_when: true

@@ -1,0 +1,104 @@
+- name: Validate EBS ownership replacement inside an isolated Linux container
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    fake_systemd_root: /tmp/discord-gateway-ownership-test
+  environment:
+    PATH: '{{ fake_systemd_root }}/bin:{{ lookup("env", "PATH") }}'
+    FAKE_SYSTEMD_ROOT: '{{ fake_systemd_root }}'
+  tasks:
+    - name: Inspect the disposable container marker
+      ansible.builtin.stat:
+        path: /.dockerenv
+      register: container_marker
+    - name: Refuse host filesystem execution
+      ansible.builtin.assert:
+        that: container_marker.stat.exists
+        fail_msg: Run this test only in the disposable Linux container.
+        quiet: true
+    - name: Set up isolated filesystem and service fixtures
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        mode: '0700'
+      loop:
+        - '{{ fake_systemd_root }}/bin'
+        - /var/lib/discord-gateway/acme
+        - /var/log/discord-gateway
+        - /etc/systemd/system
+    - name: Install the fake service manager
+      ansible.builtin.copy:
+        src: fixtures/systemctl
+        dest: '{{ fake_systemd_root }}/bin/systemctl'
+        mode: '0700'
+    - name: Create managed writer unit fixtures
+      ansible.builtin.copy:
+        content: '[Unit]'
+        dest: '/etc/systemd/system/{{ item }}'
+        mode: '0600'
+      loop:
+        - discord-gateway.service
+        - discord-gateway-backup.service
+        - discord-gateway-backup.timer
+    - name: Create old private files with a different numerical owner
+      ansible.builtin.copy:
+        content: fixture
+        dest: '/var/lib/discord-gateway/{{ item }}'
+        owner: '4321'
+        group: '4321'
+        mode: '0600'
+      loop: [gateway.db, acme/key, .maintenance.lock]
+    - name: Keep the old private subdirectory mode
+      ansible.builtin.file:
+        path: /var/lib/discord-gateway/acme
+        owner: '4321'
+        group: '4321'
+        mode: '0700'
+    - name: Observe the lock inode before migration
+      ansible.builtin.stat:
+        path: /var/lib/discord-gateway/.maintenance.lock
+      register: old_lock
+    - name: Run the actual ownership reconciliation
+      ansible.builtin.import_tasks: ../../ansible/tasks/storage_identity.yml
+    - name: Observe migrated private files
+      ansible.builtin.stat:
+        path: '/var/lib/discord-gateway/{{ item }}'
+      loop: [gateway.db, acme/key, acme, .maintenance.lock]
+      register: migrated_entries
+    - name: Check new identity, unchanged file modes and the same lock inode
+      ansible.builtin.assert:
+        that:
+          - migrated_entries.results | map(attribute='stat.uid') | unique | list == [gateway_account.uid]
+          - migrated_entries.results | map(attribute='stat.gid') | unique | list == [gateway_account.group]
+          - migrated_entries.results[0].stat.mode == '0600'
+          - migrated_entries.results[1].stat.mode == '0600'
+          - migrated_entries.results[2].stat.mode == '0700'
+          - migrated_entries.results[3].stat.inode == old_lock.stat.inode
+        quiet: true
+    - name: Read writer stop effects
+      ansible.builtin.slurp:
+        src: '{{ fake_systemd_root }}/effects.jsonl'
+      register: writer_stops
+    - name: Check that scheduling and both writers were stopped
+      ansible.builtin.assert:
+        that:
+          - (writer_stops.content | b64decode | split('\n') | reject('equalto', '') | map('from_json') | list) == [{'command':'stop','unit':'discord-gateway-backup.timer'}, {'command':'stop','unit':'discord-gateway.service'}, {'command':'stop','unit':'discord-gateway-backup.service'}]
+        quiet: true
+    - name: Clear observed effects
+      ansible.builtin.copy:
+        content: ''
+        dest: '{{ fake_systemd_root }}/effects.jsonl'
+        mode: '0600'
+    - name: Run unchanged ownership reconciliation
+      ansible.builtin.import_tasks: ../../ansible/tasks/storage_identity.yml
+    - name: Read effects from the unchanged run
+      ansible.builtin.slurp:
+        src: '{{ fake_systemd_root }}/effects.jsonl'
+      register: unchanged_effects
+    - name: Check unchanged deployment does not stop writers
+      ansible.builtin.assert:
+        that:
+          - not persistent_ownership_changed
+          - unchanged_effects.content | b64decode == ''
+        quiet: true

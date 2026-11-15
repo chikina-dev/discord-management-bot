@@ -1,0 +1,8 @@
+/var/log/discord-gateway/gateway.log {
+  size 16M
+  rotate 4
+  missingok
+  notifempty
+  copytruncate
+  compress
+}

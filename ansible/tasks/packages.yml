@@ -1,0 +1,48 @@
+- name: Inspect installed packages
+  ansible.builtin.package_facts:
+    manager: rpm
+
+- name: Install missing packages with temporary bootstrap swap
+  when: "'wireguard-tools' not in ansible_facts.packages or 'amazon-cloudwatch-agent' not in ansible_facts.packages or 'awscli-2' not in ansible_facts.packages"
+  block:
+    - name: Allocate temporary swap for DNF metadata on nano
+      ansible.builtin.command:
+        argv: [fallocate, -l, 512M, /var/cache/discord-gateway-bootstrap.swap]
+        creates: /var/cache/discord-gateway-bootstrap.swap
+    - name: Restrict swap file permissions
+      ansible.builtin.file:
+        path: /var/cache/discord-gateway-bootstrap.swap
+        mode: '0600'
+    - name: Format temporary swap
+      ansible.builtin.command:
+        argv: [mkswap, /var/cache/discord-gateway-bootstrap.swap]
+      changed_when: true
+    - name: Enable temporary swap
+      ansible.builtin.command:
+        argv: [swapon, /var/cache/discord-gateway-bootstrap.swap]
+      register: bootstrap_swap
+      changed_when: true
+    - name: Install WireGuard tools and CloudWatch agent
+      ansible.builtin.dnf:
+        name:
+          - wireguard-tools
+          - amazon-cloudwatch-agent
+          - awscli-2
+        state: present
+        install_weak_deps: false
+  always:
+    - name: Disable temporary swap
+      ansible.builtin.command:
+        argv: [swapoff, /var/cache/discord-gateway-bootstrap.swap]
+      when: bootstrap_swap is defined and bootstrap_swap is succeeded
+      changed_when: true
+    - name: Remove temporary swap
+      ansible.builtin.file:
+        path: /var/cache/discord-gateway-bootstrap.swap
+        state: absent
+
+- name: Keep the SSM agent running
+  ansible.builtin.systemd_service:
+    name: amazon-ssm-agent
+    enabled: true
+    state: started

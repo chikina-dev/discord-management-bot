@@ -1,0 +1,5 @@
+ansible_connection: amazon.aws.aws_ssm
+ansible_aws_ssm_profile: default
+ansible_aws_ssm_region: ap-northeast-1
+ansible_aws_ssm_bucket_name: discord-gateway-ansible-435684131663-ap-northeast-1
+ansible_aws_ssm_bucket_sse_mode: AES256

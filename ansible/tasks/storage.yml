@@ -1,0 +1,31 @@
+- name: Locate the dedicated data EBS
+  ansible.builtin.set_fact:
+    data_device: "/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_{{ (block_device_mappings | selectattr('device_name', 'equalto', '/dev/sdf') | first).ebs.volume_id | replace('-', '') }}"
+
+- name: Wait for the attached data disk
+  ansible.builtin.wait_for:
+    path: '{{ data_device }}'
+    timeout: 120
+
+- name: Create or grow the data filesystem without overwriting existing data
+  community.general.filesystem:
+    dev: '{{ data_device }}'
+    fstype: ext4
+    resizefs: true
+
+- name: Read the filesystem UUID
+  ansible.builtin.command:
+    argv: [blkid, -s, UUID, -o, value, '{{ data_device }}']
+  register: data_uuid
+  changed_when: false
+
+- name: Mount the persistent data volume
+  ansible.posix.mount:
+    path: /var/lib/discord-gateway
+    src: 'UUID={{ data_uuid.stdout }}'
+    fstype: ext4
+    opts: defaults,nofail
+    state: mounted
+
+- name: Reconcile persistent application ownership
+  ansible.builtin.import_tasks: storage_identity.yml

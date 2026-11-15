@@ -1,0 +1,29 @@
+- name: Clear effects from the preceding case
+  ansible.builtin.copy:
+    content: ''
+    dest: '{{ fake_systemd_root }}/effects.jsonl'
+    mode: '0600'
+
+- name: Set the deployment change snapshot
+  ansible.builtin.set_fact:
+    gateway_binary: {changed: '{{ case.binary | default(false) }}'}
+    gateway_unit: {changed: '{{ case.gateway | default(false) }}'}
+    dns_unit: {changed: '{{ case.dns | default(false) }}'}
+    backup_unit: {changed: '{{ case.backup | default(false) }}'}
+    backup_timer: {changed: '{{ case.timer | default(false) }}'}
+    runtime_parameters_changed: '{{ case.parameters | default(false) }}'
+
+- name: Run the production activation effects against the isolated adapter
+  ansible.builtin.include_tasks: ../../ansible/tasks/activate.yml
+
+- name: Read observed lifecycle effects
+  ansible.builtin.slurp:
+    src: '{{ fake_systemd_root }}/effects.jsonl'
+  register: observed_effects
+
+- name: Compare lifecycle effects with the case's required outcome
+  ansible.builtin.assert:
+    that:
+      - (observed_effects.content | b64decode | split('\n') | reject('equalto', '') | map('from_json') | list) == case.effects
+    fail_msg: 'Unexpected lifecycle effects for {{ case.name }}'
+    quiet: true

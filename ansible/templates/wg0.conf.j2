@@ -1,0 +1,8 @@
+[Interface]
+Address = 10.203.0.1/30
+ListenPort = 51820
+PrivateKey = {{ wireguard_server_private_key }}
+
+[Peer]
+PublicKey = {{ wireguard_client_public_key }}
+AllowedIPs = 10.203.0.2/32

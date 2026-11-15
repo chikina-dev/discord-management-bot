@@ -1,0 +1,23 @@
+- name: Reload changed unit definitions
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: gateway_unit.changed or dns_unit.changed or backup_unit.changed or backup_timer.changed
+
+- name: Start or refresh the independent DNS updater
+  ansible.builtin.systemd_service:
+    name: discord-gateway-dns.service
+    enabled: true
+    state: "{{ 'restarted' if gateway_binary.changed or dns_unit.changed else 'started' }}"
+    no_block: true
+
+- name: Start or activate the gateway
+  ansible.builtin.systemd_service:
+    name: discord-gateway.service
+    enabled: true
+    state: "{{ 'restarted' if gateway_binary.changed or gateway_unit.changed or runtime_parameters_changed else 'started' }}"
+
+- name: Start or refresh the backup schedule
+  ansible.builtin.systemd_service:
+    name: discord-gateway-backup.timer
+    enabled: true
+    state: "{{ 'restarted' if backup_timer.changed else 'started' }}"

@@ -1,0 +1,10 @@
+FROM golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696 AS build
+RUN apk add --no-cache build-base
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/gateway ./cmd/gateway
+COPY internal ./internal
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -trimpath -tags netgo,osusergo,sqlite_omit_load_extension -ldflags="-s -w -linkmode external -extldflags '-static'" -o /out/gateway ./cmd/gateway
+FROM scratch AS artifact
+COPY --from=build /out/gateway /gateway

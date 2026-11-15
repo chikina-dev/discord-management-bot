@@ -1,0 +1,14 @@
+[Unit]
+Description=Update the gateway's dynamic public IPv4 in Route 53
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/discord-gateway dns-update
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=200
+[Install]
+WantedBy=multi-user.target

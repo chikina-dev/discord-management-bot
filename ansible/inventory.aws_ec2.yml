@@ -1,0 +1,9 @@
+plugin: amazon.aws.aws_ec2
+profile: default
+regions:
+  - ap-northeast-1
+filters:
+  tag:Name: discord-management-bot
+  instance-state-name: running
+hostnames:
+  - instance-id

@@ -1,0 +1,89 @@
+- name: Create the application user
+  ansible.builtin.user:
+    name: discord-gateway
+    system: true
+    create_home: false
+    home: /var/lib/discord-gateway
+    shell: /sbin/nologin
+  register: gateway_account
+
+- name: Ensure private application directories exist
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    mode: '0700'
+  loop:
+    - /var/lib/discord-gateway
+    - /var/log/discord-gateway
+
+- name: Create the maintenance lock only when absent
+  ansible.builtin.command:
+    argv: [touch, /var/lib/discord-gateway/.maintenance.lock]
+    creates: /var/lib/discord-gateway/.maintenance.lock
+
+- name: Inspect application directory owners
+  ansible.builtin.stat:
+    path: '{{ item }}'
+  loop:
+    - /var/lib/discord-gateway
+    - /var/log/discord-gateway
+  register: application_roots
+
+- name: Inspect existing persistent file owners
+  ansible.builtin.find:
+    paths:
+      - /var/lib/discord-gateway
+      - /var/log/discord-gateway
+    recurse: true
+    hidden: true
+    file_type: any
+    follow: false
+  register: persistent_entries
+
+- name: Decide whether numerical ownership needs reconciliation
+  ansible.builtin.set_fact:
+    persistent_ownership_changed: "{{ ((application_roots.results | map(attribute='stat') | list + persistent_entries.files) | selectattr('uid', 'ne', gateway_account.uid) | list | length > 0) or ((application_roots.results | map(attribute='stat') | list + persistent_entries.files) | selectattr('gid', 'ne', gateway_account.group) | list | length > 0) }}"
+
+- name: Reconcile the existing tree while no writer is running
+  when: persistent_ownership_changed
+  block:
+    - name: Inspect managed writer units
+      ansible.builtin.stat:
+        path: '/etc/systemd/system/{{ item }}'
+      loop:
+        - discord-gateway-backup.timer
+        - discord-gateway.service
+        - discord-gateway-backup.service
+      register: writer_units
+    - name: Stop scheduling and wait for all managed writers
+      ansible.builtin.systemd_service:
+        name: '{{ item.item }}'
+        state: stopped
+      loop: '{{ writer_units.results }}'
+      when: item.stat.exists
+      loop_control:
+        label: '{{ item.item }}'
+    - name: Change owners under the exclusive maintenance lock
+      ansible.builtin.command:
+        argv:
+          - flock
+          - --exclusive
+          - --nonblock
+          - /var/lib/discord-gateway/.maintenance.lock
+          - chown
+          - -R
+          - --no-dereference
+          - discord-gateway:discord-gateway
+          - /var/lib/discord-gateway
+          - /var/log/discord-gateway
+      changed_when: true
+      when: not ansible_check_mode
+
+- name: Preserve the private maintenance lock inode
+  ansible.builtin.file:
+    path: /var/lib/discord-gateway/.maintenance.lock
+    state: file
+    owner: discord-gateway
+    group: discord-gateway
+    mode: '0600'
+  when: not ansible_check_mode

@@ -1,0 +1,98 @@
+- name: Install the ARM64 gateway binary
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../dist/gateway'
+    dest: /usr/local/bin/discord-gateway
+    owner: root
+    group: root
+    mode: '0755'
+  register: gateway_binary
+
+- name: Install the gateway unit
+  ansible.builtin.copy:
+    src: discord-gateway.service
+    dest: /etc/systemd/system/discord-gateway.service
+    mode: '0644'
+  register: gateway_unit
+
+- name: Install the DNS update unit
+  ansible.builtin.copy:
+    src: discord-gateway-dns.service
+    dest: /etc/systemd/system/discord-gateway-dns.service
+    mode: '0644'
+  register: dns_unit
+
+- name: Install the backup unit
+  ansible.builtin.copy:
+    src: discord-gateway-backup.service
+    dest: /etc/systemd/system/discord-gateway-backup.service
+    mode: '0644'
+  register: backup_unit
+
+- name: Install the backup timer
+  ansible.builtin.copy:
+    src: discord-gateway-backup.timer
+    dest: /etc/systemd/system/discord-gateway-backup.timer
+    mode: '0644'
+  register: backup_timer
+
+- name: Read runtime parameter versions without decrypting values
+  ansible.builtin.command:
+    argv:
+      - aws
+      - ssm
+      - get-parameter
+      - --region
+      - ap-northeast-1
+      - --name
+      - '/discord-management-bot/{{ item }}'
+      - --query
+      - Parameter.Version
+      - --output
+      - text
+      - --no-cli-pager
+  loop: [bot-token, guild-id, signing-seed]
+  register: runtime_parameter_metadata
+  changed_when: false
+  check_mode: false
+
+- name: Build the runtime version snapshot
+  ansible.builtin.set_fact:
+    runtime_parameter_versions: "{{ dict(runtime_parameter_metadata.results | map(attribute='item') | zip(runtime_parameter_metadata.results | map(attribute='stdout') | map('int'))) | to_json }}"
+
+- name: Inspect the successfully activated runtime version snapshot
+  ansible.builtin.stat:
+    path: /var/lib/discord-gateway/runtime-parameters.json
+  register: runtime_parameter_marker
+
+- name: Read the previously activated versions
+  ansible.builtin.slurp:
+    src: /var/lib/discord-gateway/runtime-parameters.json
+  register: previous_runtime_parameters
+  when: runtime_parameter_marker.stat.exists
+
+- name: Decide whether changed runtime parameters require activation
+  ansible.builtin.set_fact:
+    runtime_parameters_changed: "{{ not runtime_parameter_marker.stat.exists or (previous_runtime_parameters.content | default('') | b64decode | trim) != runtime_parameter_versions }}"
+
+- name: Activate affected host processes
+  ansible.builtin.import_tasks: activate.yml
+
+- name: Wait for the private management listener to become healthy
+  ansible.builtin.uri:
+    url: http://10.203.0.1:8080/health
+    return_content: false
+    timeout: 2
+  register: gateway_health
+  until: gateway_health.status | default(0) == 200
+  retries: 15
+  delay: 2
+  when: not ansible_check_mode
+
+- name: Record the versions only after successful activation
+  ansible.builtin.copy:
+    content: '{{ runtime_parameter_versions }}'
+    dest: /var/lib/discord-gateway/runtime-parameters.json
+    owner: discord-gateway
+    group: discord-gateway
+    mode: '0600'
+  when: not ansible_check_mode

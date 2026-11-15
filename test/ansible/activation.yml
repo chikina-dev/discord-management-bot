@@ -1,0 +1,64 @@
+- name: Validate host activation without a live systemd or AWS
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    fake_systemd_root: /tmp/discord-gateway-systemd-test
+    cases:
+      - name: unchanged deployment
+        effects: []
+      - name: backup implementation update
+        backup: true
+        effects:
+          - {command: daemon-reload, unit: ''}
+      - name: backup schedule update
+        timer: true
+        effects:
+          - {command: daemon-reload, unit: ''}
+          - {command: restart, unit: discord-gateway-backup.timer}
+      - name: DNS implementation update
+        dns: true
+        effects:
+          - {command: daemon-reload, unit: ''}
+          - {command: restart, unit: discord-gateway-dns.service}
+      - name: gateway unit update
+        gateway: true
+        effects:
+          - {command: daemon-reload, unit: ''}
+          - {command: restart, unit: discord-gateway.service}
+      - name: runtime parameter update
+        parameters: true
+        effects:
+          - {command: restart, unit: discord-gateway.service}
+      - name: shared binary update
+        binary: true
+        effects:
+          - {command: restart, unit: discord-gateway-dns.service}
+          - {command: restart, unit: discord-gateway.service}
+  environment:
+    PATH: '{{ fake_systemd_root }}/bin:{{ lookup("env", "PATH") }}'
+    FAKE_SYSTEMD_ROOT: '{{ fake_systemd_root }}'
+  tasks:
+    - name: Create the isolated adapter directory
+      ansible.builtin.file:
+        path: '{{ fake_systemd_root }}/bin'
+        state: directory
+        mode: '0700'
+    - name: Install the test service-manager adapter
+      ansible.builtin.copy:
+        src: fixtures/systemctl
+        dest: '{{ fake_systemd_root }}/bin/systemctl'
+        mode: '0700'
+    - name: Test change-specific effects
+      block:
+        - name: Execute each activation case
+          ansible.builtin.include_tasks: activation_case.yml
+          loop: '{{ cases }}'
+          loop_control:
+            loop_var: case
+            label: '{{ case.name }}'
+      always:
+        - name: Remove the isolated adapter state
+          ansible.builtin.file:
+            path: '{{ fake_systemd_root }}'
+            state: absent
